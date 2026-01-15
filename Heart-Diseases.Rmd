@@ -1,0 +1,414 @@
+---
+title: "Heart Disease Comprehensive Analysis"
+author: "Data Analytics Project"
+date: "`r Sys.Date()`"
+output: 
+  html_notebook:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+# Heart Disease Analysis - Comprehensive Data Analytics Project
+
+This notebook performs comprehensive analysis on heart disease data including:
+- Data Preprocessing & Cleaning
+- Exploratory Data Analysis (EDA)
+- Statistical Tests
+- Correlation Analysis
+- Machine Learning Models
+- Model Evaluation & Comparison
+
+# 1. Load Required Libraries
+
+```{r setup, message=FALSE, warning=FALSE}
+packages <- c("tidyverse", "caret", "corrplot", "ggplot2", "dplyr", 
+              "reshape2", "gridExtra", "pROC", "randomForest", 
+              "e1071", "rpart", "rpart.plot", "class", "MASS",
+              "ggcorrplot", "viridis", "scales", "plotly", "GGally")
+
+install_if_missing <- function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+invisible(sapply(packages, install_if_missing))
+```
+
+# 2. Data Loading & Initial Exploration
+
+```{r load_data}
+#Heart Disease dataset from UCI repository
+url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
+column_names <- c("age", "sex", "cp", "trestbps", "chol", "fbs", "restecg", 
+                  "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target")
+
+heart_data <- read.csv(url, header = FALSE, col.names = column_names, na.strings = "?")
+
+cat("Dimensions:", dim(heart_data), "\n")
+head(heart_data)
+```
+
+```{r summary_stats}
+str(heart_data)
+summary(heart_data)
+```
+
+# 3. Data Preprocessing & Cleaning
+
+```{r preprocessing}
+
+colSums(is.na(heart_data))
+
+heart_data_clean <- na.omit(heart_data)
+cat("\nRows after removing missing values:", nrow(heart_data_clean), "\n")
+
+heart_data_clean$target <- ifelse(heart_data_clean$target > 0, 1, 0)
+
+heart_data_clean <- heart_data_clean %>%
+  mutate(
+    sex = factor(sex, levels = c(0, 1), labels = c("Female", "Male")),
+    cp = factor(cp, levels = c(0, 1, 2, 3), 
+                labels = c("Typical Angina", "Atypical Angina", 
+                           "Non-Anginal Pain", "Asymptomatic")),
+    fbs = factor(fbs, levels = c(0, 1), 
+                 labels = c("FBS <= 120", "FBS > 120")),
+    restecg = factor(restecg, levels = c(0, 1, 2),
+                     labels = c("Normal", "ST-T Abnormality", "LVH")),
+    exang = factor(exang, levels = c(0, 1), 
+                   labels = c("No", "Yes")),
+    slope = factor(slope, levels = c(1, 2, 3),
+                   labels = c("Upsloping", "Flat", "Downsloping")),
+    thal = factor(thal, levels = c(3, 6, 7),
+                  labels = c("Normal", "Fixed Defect", "Reversible Defect")),
+    target = factor(target, levels = c(0, 1), 
+                    labels = c("No_Disease", "Disease"))
+  )
+
+heart_data_clean <- na.omit(heart_data_clean)
+cat("Final clean rows:", nrow(heart_data_clean), "\n")
+
+str(heart_data_clean)
+```
+
+# 4. Exploratory Data Analysis (EDA)
+
+## 4.1 Target Variable Distribution
+
+```{r eda_target}
+# Target Variable Distribution
+print(table(heart_data_clean$target))
+print(prop.table(table(heart_data_clean$target)) * 100)
+
+ggplot(heart_data_clean, aes(x = target, fill = target)) +
+  geom_bar(width = 0.6, alpha = 0.8) +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, size = 5) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Heart Disease Distribution",
+       subtitle = "Count of patients with and without heart disease",
+       x = "Diagnosis", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## 4.2 Age Analysis
+
+```{r eda_age}
+# Age Distribution
+p1 <- ggplot(heart_data_clean, aes(x = age, fill = target)) +
+  geom_histogram(bins = 20, alpha = 0.7, position = "identity") +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Age Distribution", x = "Age", y = "Frequency") +
+  theme_minimal()
+
+p2 <- ggplot(heart_data_clean, aes(x = age, fill = target)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Age Density", x = "Age", y = "Density") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+## 4.3 Categorical Features Analysis
+
+```{r eda_categorical}
+# Sex vs Heart Disease
+p3 <- ggplot(heart_data_clean, aes(x = sex, fill = target)) +
+  geom_bar(position = "dodge", alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Heart Disease by Sex") +
+  theme_minimal()
+
+# Chest Pain Type
+p4 <- ggplot(heart_data_clean, aes(x = cp, fill = target)) +
+  geom_bar(position = "dodge", alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Chest Pain Type Impact") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(p3, p4, ncol = 2)
+```
+
+## 4.4 Clinical Measures (Box Plots)
+
+```{r eda_clinical}
+# Cholesterol
+p5 <- ggplot(heart_data_clean, aes(x = target, y = chol, fill = target)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Cholesterol Levels") +
+  theme_minimal() + theme(legend.position = "none")
+
+# Max Heart Rate
+p6 <- ggplot(heart_data_clean, aes(x = target, y = thalach, fill = target)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Max Heart Rate") +
+  theme_minimal() + theme(legend.position = "none")
+
+# Resting Blood Pressure
+p7 <- ggplot(heart_data_clean, aes(x = target, y = trestbps, fill = target)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Resting BP") +
+  theme_minimal() + theme(legend.position = "none")
+
+grid.arrange(p5, p6, p7, ncol = 3)
+```
+
+# 5. Correlation Analysis
+
+```{r correlation}
+# Create numeric version of data for correlation
+heart_numeric <- heart_data_clean
+heart_numeric[] <- lapply(heart_numeric, function(x) {
+  if(is.factor(x)) as.numeric(x) else x
+})
+
+# Calculate correlation matrix
+cor_matrix <- cor(heart_numeric, use = "complete.obs")
+
+# Correlation Heatmap
+corrplot(cor_matrix, method = "color", type = "upper",
+         col = colorRampPalette(c("#3498db", "white", "#e74c3c"))(200),
+         addCoef.col = "black", number.cex = 0.6,
+         tl.col = "black", tl.srt = 45,
+         title = "Correlation Matrix", mar = c(0, 0, 2, 0))
+```
+
+# 6. Statistical Tests
+
+## 6.1 Chi-Square Tests
+```{r stats_chi_sq}
+# Chi-Square Tests
+cat("Sex vs Target:\n")
+print(chisq.test(table(heart_data_clean$sex, heart_data_clean$target)))
+
+cat("\nChest Pain vs Target:\n")
+print(chisq.test(table(heart_data_clean$cp, heart_data_clean$target)))
+
+cat("\nExercise Induced Angina vs Target:\n")
+print(chisq.test(table(heart_data_clean$exang, heart_data_clean$target)))
+```
+
+## 6.2 T-Tests
+```{r stats_t_test}
+# T-Tests for Continuous Variables
+cat("Age T-Test:\n")
+print(t.test(age ~ target, data = heart_data_clean))
+
+cat("\nCholesterol T-Test:\n")
+print(t.test(chol ~ target, data = heart_data_clean))
+
+cat("\nMax Heart Rate T-Test:\n")
+print(t.test(thalach ~ target, data = heart_data_clean))
+```
+
+# 7. Feature Engineering
+
+```{r feature_engineering}
+# Create age groups
+heart_data_clean$age_group <- cut(heart_data_clean$age, 
+                                   breaks = c(0, 40, 50, 60, 100),
+                                   labels = c("Young", "Middle", "Senior", "Elderly"))
+
+# Create cholesterol categories
+heart_data_clean$chol_category <- cut(heart_data_clean$chol,
+                                       breaks = c(0, 200, 240, 600),
+                                       labels = c("Desirable", "Borderline High", "High"))
+
+# Create blood pressure categories
+heart_data_clean$bp_category <- cut(heart_data_clean$trestbps,
+                                     breaks = c(0, 120, 140, 200),
+                                     labels = c("Normal", "Elevated", "High"))
+
+# Visualize new features
+ggplot(heart_data_clean, aes(x = age_group, fill = target)) +
+  geom_bar(position = "fill", alpha = 0.8) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Heart Disease by Age Group", y = "Proportion") +
+  theme_minimal()
+```
+
+# 8. Model Building
+
+## 8.1 Data Preparation
+```{r model_prep}
+# Select features for modeling
+model_data <- heart_data_clean %>%
+  dplyr::select(-age_group, -chol_category, -bp_category) %>%
+  na.omit() # Ensure no NAs in model data
+
+# Split data
+set.seed(42)
+train_index <- createDataPartition(model_data$target, p = 0.8, list = FALSE)
+train_data <- model_data[train_index, ]
+test_data <- model_data[-train_index, ]
+
+# Training Control
+train_control <- trainControl(method = "cv", number = 10, 
+                               classProbs = TRUE,
+                               summaryFunction = twoClassSummary)
+
+# Store results
+model_results <- data.frame(Model = character(),
+                            Accuracy = numeric(),
+                            Sensitivity = numeric(),
+                            Specificity = numeric(),
+                            AUC = numeric(),
+                            stringsAsFactors = FALSE)
+```
+
+## 8.2 Logistic Regression
+```{r model_logit}
+logit_model <- glm(target ~ ., data = train_data, family = binomial())
+logit_pred_prob <- predict(logit_model, test_data, type = "response")
+logit_pred <- ifelse(logit_pred_prob > 0.5, "Disease", "No_Disease")
+logit_pred <- factor(logit_pred, levels = c("No_Disease", "Disease"))
+
+logit_cm <- confusionMatrix(logit_pred, test_data$target)
+logit_roc <- roc(test_data$target, logit_pred_prob)
+logit_auc <- auc(logit_roc)
+
+model_results <- rbind(model_results, 
+                       data.frame(Model = "Logistic Regression",
+                                  Accuracy = logit_cm$overall["Accuracy"],
+                                  Sensitivity = logit_cm$byClass["Sensitivity"],
+                                  Specificity = logit_cm$byClass["Specificity"],
+                                  AUC = as.numeric(logit_auc)))
+print(logit_cm)
+```
+
+## 8.3 Decision Tree
+```{r model_dt}
+dt_model <- train(target ~ ., data = train_data, 
+                  method = "rpart",
+                  trControl = train_control,
+                  metric = "ROC")
+
+rpart.plot(dt_model$finalModel, box.palette = c("#3498db", "#e74c3c"))
+
+dt_pred <- predict(dt_model, test_data)
+dt_pred_prob <- predict(dt_model, test_data, type = "prob")[, "Disease"]
+dt_cm <- confusionMatrix(dt_pred, test_data$target)
+dt_roc <- roc(test_data$target, dt_pred_prob)
+dt_auc <- auc(dt_roc)
+
+model_results <- rbind(model_results,
+                       data.frame(Model = "Decision Tree",
+                                  Accuracy = dt_cm$overall["Accuracy"],
+                                  Sensitivity = dt_cm$byClass["Sensitivity"],
+                                  Specificity = dt_cm$byClass["Specificity"],
+                                  AUC = as.numeric(dt_auc)))
+```
+
+## 8.4 Random Forest
+```{r model_rf}
+rf_model <- train(target ~ ., data = train_data,
+                  method = "rf",
+                  trControl = train_control,
+                  metric = "ROC",
+                  ntree = 500)
+
+rf_pred <- predict(rf_model, test_data)
+rf_pred_prob <- predict(rf_model, test_data, type = "prob")[, "Disease"]
+rf_cm <- confusionMatrix(rf_pred, test_data$target)
+rf_roc <- roc(test_data$target, rf_pred_prob)
+rf_auc <- auc(rf_roc)
+
+model_results <- rbind(model_results,
+                       data.frame(Model = "Random Forest",
+                                  Accuracy = rf_cm$overall["Accuracy"],
+                                  Sensitivity = rf_cm$byClass["Sensitivity"],
+                                  Specificity = rf_cm$byClass["Specificity"],
+                                  AUC = as.numeric(rf_auc)))
+print(rf_model)
+```
+
+## 8.5 Support Vector Machine (SVM)
+```{r model_svm}
+svm_model <- train(target ~ ., data = train_data,
+                   method = "svmRadial",
+                   trControl = train_control,
+                   metric = "ROC",
+                   preProcess = c("center", "scale"))
+
+svm_pred <- predict(svm_model, test_data)
+svm_pred_prob <- predict(svm_model, test_data, type = "prob")[, "Disease"]
+svm_cm <- confusionMatrix(svm_pred, test_data$target)
+svm_roc <- roc(test_data$target, svm_pred_prob)
+svm_auc <- auc(svm_roc)
+
+model_results <- rbind(model_results,
+                       data.frame(Model = "SVM",
+                                  Accuracy = svm_cm$overall["Accuracy"],
+                                  Sensitivity = svm_cm$byClass["Sensitivity"],
+                                  Specificity = svm_cm$byClass["Specificity"],
+                                  AUC = as.numeric(svm_auc)))
+```
+
+# 9. Model Evaluation & Conclusion
+
+```{r model_comparison}
+# Model Comparison Table
+print(model_results)
+
+# Best Model
+best_model <- model_results[which.max(model_results$Accuracy), ]
+cat("\nBest Model by Accuracy:", best_model$Model, 
+    "with Accuracy:", round(best_model$Accuracy, 4), "\n")
+
+# Visualization
+model_results_long <- model_results %>%
+  pivot_longer(cols = c(Accuracy, Sensitivity, Specificity, AUC),
+               names_to = "Metric", values_to = "Value")
+
+ggplot(model_results_long, aes(x = reorder(Model, Value), y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  scale_fill_viridis_d() +
+  coord_flip() +
+  labs(title = "Model Performance Comparison", x = "Model", y = "Score") +
+  theme_minimal()
+```
+
+```{r feature_importance}
+var_imp <- varImp(rf_model)
+plot(var_imp, main = "Feature Importance - Random Forest")
+```
+
+```{r roc_curves}
+# ROC Curves Comparison
+plot(logit_roc, col = "#e74c3c", main = "ROC Curves Comparison", lwd = 2)
+plot(dt_roc, col = "#3498db", add = TRUE, lwd = 2)
+plot(rf_roc, col = "#2ecc71", add = TRUE, lwd = 2)
+plot(svm_roc, col = "#9b59b6", add = TRUE, lwd = 2)
+legend("bottomright", 
+       legend = c("Logistic", "Decision Tree", "Random Forest", "SVM"),
+       col = c("#e74c3c", "#3498db", "#2ecc71", "#9b59b6"),
+       lwd = 2)
+```
